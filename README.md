@@ -254,9 +254,3 @@ Potential applications include:
 
 ⸻
 
-If you want, I can also help you turn this into a top-tier research repo README like:
-	•	DeepMind style
-	•	OpenAI style
-	•	HuggingFace style
-
-(with diagrams, badges, install instructions, and experiment reproduction sections).
