@@ -11,8 +11,7 @@ the latent prefix, confirming the architectural coupling is active; (2) shufflin
 degrades fluency by +0.62 nats post-training while zeroing the plan helps by−0.71 nats,
 showing the decoder has learned that wrong structure is worse than no structure; and (3) a
 gated projection bridge trained with the contrastive objective achieves the strongest structure-
-sensitivity signal across four tested projection families. Code and checkpoints are available at
-https://github.com/safehavenlabs/genesis-directive.
+sensitivity signal across four tested projection families.
 1 Introduction
 Large language models (LLMs) generate text autoregressively, conditioning each token on the
 preceding context. While powerful, this paradigm offers no principled mechanism for high-level
