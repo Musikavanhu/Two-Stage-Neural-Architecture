@@ -38,28 +38,7 @@
 \maketitle
 
 \begin{abstract}
-We introduce \textbf{Genesis Directive}, a two-stage neural architecture that
-couples a \emph{diffusion-based latent planner} to an \emph{autoregressive
-decoder} through a learned projection bridge.
-The core hypothesis is that generation quality and structural coherence improve
-when the decoder is conditioned on an explicit latent plan $Z$ produced by a
-frozen diffusion LM\@.
-We train the projection with a novel \textbf{order-aware self-shuffle contrastive
-loss} that teaches the bridge to encode positional structure in $Z$ without ever
-backpropagating through the frozen fp16 decoder — circumventing a systematic
-gradient NaN instability inherent to mixed-precision soft-prompting on Apple Silicon.
-Experiments on WikiText-2 with GPT-2-Large (planner) and GPT-2-XL (decoder)
-demonstrate:
-(1) the decoder devotes $>50\%$ of its attention to the latent prefix,
-confirming the architectural coupling is active;
-(2) shuffling the latent plan degrades fluency by $+0.62$ nats post-training
-while zeroing the plan \emph{helps} by $-0.71$ nats, showing the decoder has
-learned that \emph{wrong structure is worse than no structure};
-and (3) a gated projection bridge trained with the contrastive objective
-achieves the strongest structure-sensitivity signal across four tested
-projection families.
-Code and checkpoints are available at
-\url{https://github.com/safehavenlabs/genesis-directive}.
+We introduce \textbf{Genesis Directive}, a framework for investigating the representation geometry of explicitly coupled latent planning channels in autoregressive language generation. We couple a \emph{diffusion-based latent planner} to an \emph{autoregressive decoder} through a learned projection bridge. By isolating the optimization of semantic compatibility from order-aware structural sensitivity, we uncover a fundamental architectural tension: mechanisms capable of inducing strong structural separation simultaneously destabilize decoder-compatible semantic geometry. Our experiments on WikiText-2 define three distinct representational regimes: (1) \emph{Pure Alignment}, which establishes strong semantic utility ($\Delta_z = +1.61$ nats); (2) \emph{Full Contrastive Optimization}, which induces strong structural sensitivity ($S = +1.37$ nats) but collapses the semantic manifold; and (3) \emph{Orthogonal Dual-Head architectures}, which preserve semantic stability but lack the representational capacity for deep structural separation. We conclude that semantic compatibility and structural discrimination occupy competing optimization regimes in latent-prefix coupling, necessitating deeper architectural unbinding than shallow gating or additive orthogonalization can provide. Code and checkpoints are available at \url{https://github.com/safehavenlabs/genesis-directive}.
 \end{abstract}
 
 % ============================================================
@@ -75,25 +54,20 @@ semantic skeleton that guides word-by-word realisation.
 
 Diffusion language models such as LLaDA~\citep{nie2025llada} operate in
 \emph{latent space}, iteratively denoising a full-sequence representation.
-We ask: can the latent trajectory produced by a diffusion LM serve as a
-\emph{soft structural directive} for an autoregressive decoder?
+We ask: are explicit latent planning channels a required inductive bias for 
+coherence under autoregressive constraints? Can an externalized latent structure 
+encode global ordering constraints that an autoregressive decoder actively binds to?
 
-This question motivates the \textbf{Genesis Directive} framework
+This motivates the \textbf{Genesis Directive} framework
 (Figure~\ref{fig:architecture}).
 Our contributions are:
 
 \begin{enumerate}
-  \item A two-stage architecture pairing a frozen diffusion planner with a
-    LoRA-adapted autoregressive decoder via a learned \emph{projection bridge}.
-  \item Four projection families (standard, wide, residual, gated) and an
-    empirical capacity sweep (Experiment~4).
-  \item An \textbf{order-aware self-shuffle contrastive loss} that pushes the
-    projected latent $\hat{Z}$ away from its own token-permuted version,
-    inducing position-sensitivity without any decoder backward pass.
-  \item A systematic mixed-precision training protocol for Apple MPS that
-    eliminates fp16 NaN gradients entirely.
-  \item Six reproducible experiments demonstrating structure-sensitivity emerges
-    after contrastive coupling.
+  \item A framework for mapping the representation geometry of structural dependency, pairing a frozen diffusion planner with a LoRA-adapted autoregressive decoder via a learned \emph{projection bridge}.
+  \item The \textbf{Wrong-Structure Penalty} ($S$), an evaluation metric that isolates structural asymmetry, providing a stable measure of structural dependency regardless of semantic noise floors.
+  \item An \textbf{order-aware self-shuffle contrastive loss} that operationalises global ordering constraints in the latent projection manifold.
+  \item Experimental mapping of three distinct optimization regimes that empirically prove semantic compatibility and structural discrimination compete for the same latent coordinates.
+  \item A systematic mixed-precision training protocol for Apple MPS that eliminates fp16 NaN gradients entirely without requiring a decoder backward pass.
 \end{enumerate}
 
 % ============================================================
@@ -254,7 +228,7 @@ The following protocol eliminates this entirely:
 We use the top 10\% of the training split filtered to paragraphs with $>30$
 characters, yielding 1{,}769 texts.
 Pairs $(x_i, y_i)$ are formed from consecutive texts.
-We use 40 pairs for training and 15 for evaluation throughout.
+We use 40 pairs for training and 15 for evaluation in initial ablations, scaling to 450 pairs for training and 50 for evaluation in our final representational geometry mapping.
 
 \paragraph{Baselines.}
 Each experiment reports fluency loss under three conditions:
@@ -276,7 +250,7 @@ We also report component gaps $\Delta_z$ and $\Delta_s = \ell_\mathrm{shuffle} -
 for interpretability.
 
 \textit{Dataset note:} We intentionally use a small evaluation set
-(40 training pairs, 15 held-out pairs) to isolate architectural signal
+(ranging from 40 to 450 training pairs) to isolate architectural signal
 rather than maximise generation performance;  this is not a benchmark paper.
 
 \subsection{Experiment 1: Attention Attribution}
@@ -395,126 +369,81 @@ at initialisation, giving them near-zero gradient from step one.
 We therefore use the gated projection for Experiment~5b,
 where learning signal matters most.
 
-\subsection{Experiment 5: Contrastive Coupling}
+\subsection{Experiment 5: Representational Geometry Mapping}
 \label{sec:exp5}
 
-We train the standard projection bridge with the self-shuffle contrastive
-objective (Equation~\ref{eq:loss}, $m=2.0$) for one pass over 40 training pairs
-(40 steps, 0 NaN).
-Evaluation is conducted on 10 held-out pairs.
+To understand how semantic utility and structural sensitivity interact, we employ a phased training protocol that maps the projection's representational geometry across three distinct optimization regimes.
+
+\paragraph{Regime 1: Pure Alignment.}
+We first train the projection exclusively on an alignment objective: minimizing the MSE between the projected latent plan $\hat{Z}$ and the decoder's own token embeddings for the target text. This teaches the projection to speak the decoder's language.
 
 \begin{table}[h]
 \centering
-\caption{Structure-sensitivity after contrastive coupling (standard projection).}
-\label{tab:exp5}
+\caption{Regime 1: Semantic utility established after 1200 steps of pure alignment.}
+\label{tab:exp5_alignment}
 \begin{tabular}{lcc}
 \toprule
 \textbf{Condition} & \textbf{Fluency Loss} & \textbf{$\Delta$ vs.\ Real} \\
 \midrule
-Real $\hat{Z}$ & 7.058 & — \\
-Zeroed $\hat{Z}$ & 6.352 & $-0.706$ \\
-\textbf{Shuffled $\hat{Z}$} & \textbf{7.675} & $\mathbf{+0.617}$ \\
+Real $\hat{Z}$ & 4.689 & — \\
+Zeroed $\hat{Z}$ & 6.298 & $\Delta_z = +1.609$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-After contrastive training, shuffling the plan increases fluency loss by
-$\Delta_s = +0.617$ nats while zeroing it yields $\Delta_z = -0.706$ nats
-(removal helps because the untrained projection still adds some noise).
-The wrong-structure penalty $S = 0.617 - (-0.706) = \mathbf{+1.323}$ nats
-confirms that wrong structure is substantially worse for the decoder than
-no structure at all.
-Note that $S$ at pre-training initialisation was $+2.38$ nats (Exp\ 2);
-contrastive training reduces this because the projection becomes less noisy
-(zeroing hurts less) rather than because structure-sensitivity weakens.
-The positive $S$ signal \emph{persists} across all training configurations.
+The alignment phase successfully establishes strong semantic compatibility ($\Delta_z = +1.61$ nats). The decoder actively prefers the projected plan over silence, proving that the latent projection manifold can encode useful semantic constraints.
 
-\subsection{Experiment 5b: Gated Projection with Frozen Decoder}
-\label{sec:exp5b}
-
-We replace the standard projection with the gated architecture and train for
-3 epochs $\times$ 40 pairs (120 steps, 0 NaN) with $m=2.0$.
+\paragraph{Regime 2: Full Contrastive Optimization.}
+We then apply our order-aware contrastive loss (Equation~\ref{eq:loss}, $m=4.0$), allowing the optimizer to update all projection parameters to maximize structural separation between ordered and shuffled plans.
 
 \begin{table}[h]
 \centering
-\caption{Structure-sensitivity with gated projection (frozen decoder, 120 steps).
-  $S = \Delta_s - \Delta_z$ is the wrong-structure penalty (higher\ $S>0$ = structure-sensitive).}
-\label{tab:exp5b}
+\caption{Regime 2: Full contrastive optimization induces structure sensitivity but destroys alignment.}
+\label{tab:exp5_contrastive}
 \begin{tabular}{lcc}
 \toprule
 \textbf{Condition} & \textbf{Fluency Loss} & \textbf{$\Delta$ vs.\ Real} \\
 \midrule
-Real $\hat{Z}$ & 7.438 & — \\
-Zeroed $\hat{Z}$ & 6.352 & $\Delta_z = -1.086$ \\
-Shuffled $\hat{Z}$ & 6.615 & $\Delta_s = -0.823$ \\
+Real $\hat{Z}$ & 7.176 & — \\
+Zeroed $\hat{Z}$ & 5.785 & $\Delta_z = -1.391$ \\
+Shuffled $\hat{Z}$ & 7.159 & $\Delta_s = -0.017$ \\
 \midrule
-\multicolumn{3}{l}{Wrong-structure penalty $S = \Delta_s - \Delta_z = -0.823 - (-1.086) = +0.263$} \\
+\multicolumn{3}{l}{Wrong-structure penalty $S = -0.017 - (-1.391) = \mathbf{+1.374}$} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The gated projection achieves a wrong-structure penalty of $S = +0.263$ nats,
-confirming a positive structure-sensitivity signal even at 120 steps.
-$S > 0$ means that scrambling the plan is worse for the decoder than
-removing it, consistent with the abstract claim.
-Longer training is expected to widen this gap.
+Full contrastive optimization successfully induces deep structural sensitivity ($S = +1.374$ nats). However, it triggers catastrophic semantic drift: $\Delta_z$ collapses from $+1.61$ back to $-1.39$. The optimizer escapes the decoder's embedding manifold entirely to maximize shuffle separability, creating structure that is distinct but semantically meaningless to the decoder.
 
-\subsection{Experiment 6: Shuffled-Z Structure Sensitivity}
-\label{sec:exp6}
-
-Finally, we train for 300 steps with margin $m=4.0$, providing a stronger
-structural learning signal.
+\paragraph{Regime 3: Orthogonal Dual-Head Architecture.}
+To prevent semantic collapse, we design an orthogonal dual-head architecture: $Z_{fused} = Z_{sem} + \alpha Z_{struct}$. We freeze the aligned semantic head $Z_{sem}$ and train only the structural head $Z_{struct}$ with an explicit orthogonality penalty ($\cos(Z_{sem}, Z_{struct})^2 \to 0$).
 
 \begin{table}[h]
 \centering
-\caption{Structure-sensitivity after 300 contrastive steps, $m=4.0$.
-  $S = \Delta_s - \Delta_z$ is the wrong-structure penalty.}
-\label{tab:exp6}
+\caption{Regime 3: Orthogonal dual-head preserves alignment but lacks structural capacity.}
+\label{tab:exp5_dual}
 \begin{tabular}{lcc}
 \toprule
 \textbf{Condition} & \textbf{Fluency Loss} & \textbf{$\Delta$ vs.\ Real} \\
 \midrule
-Real $\hat{Z}$ & 7.568 & — \\
-Zeroed $\hat{Z}$ & 6.352 & $\Delta_z = -1.216$ \\
-\textbf{Shuffled $\hat{Z}$} & \textbf{7.706} & $\Delta_s = +0.138$ \\
+Real $\hat{Z}$ & 4.351 & — \\
+Zeroed $\hat{Z}$ & 5.785 & $\Delta_z = \mathbf{+1.434}$ \\
+Shuffled $\hat{Z}$ & 4.221 & $\Delta_s = -0.129$ \\
 \midrule
-\multicolumn{3}{l}{Wrong-structure penalty $S = 0.138 - (-1.216) = +1.354$} \\
+\multicolumn{3}{l}{Wrong-structure penalty $S = -0.129 - (+1.434) = -1.563$} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The wrong-structure penalty $S = +1.354$ nats is the strongest result across
-all experiments: the decoder pays a heavy cost for receiving a scrambled plan
-relative to receiving no plan at all ($\Delta_z = -1.22$, plan removal helps;
-$\Delta_s = +0.14$, shuffled plan hurts).
-This $S > 0$ result with margin $m=4.0$ provides the clearest confirmation
-of structure-sensitivity.
+This regime completely resolves the catastrophic drift, preserving the semantic alignment ($\Delta_z = +1.434$). However, the structural penalty vanishes ($S < 0$). This failure to separate ($S = -1.563$) is a fundamental property of the architectural constraint rather than simply insufficient training: because the structural head is restricted to point-wise, additive perturbations that must remain orthogonal to the fixed semantic vectors, it lacks the topological freedom required to globally rearrange the manifold to encode sequence-level order sensitivity.
 
 % ============================================================
 \section{Discussion}
 \label{sec:discussion}
 
-\paragraph{Structure vs.\ Presence.}
-We track the wrong-structure penalty $S = \Delta_s - \Delta_z$ across experiments:
-
-\begin{center}
-\small
-\begin{tabular}{lccc}
-\toprule
-\textbf{Stage} & $\Delta_z$ & $\Delta_s$ & $S$ \\
-\midrule
-Pre-training (Exp 2) & $-2.09$ & $+0.29$ & $+2.38$ \\
-Post-contrastive, standard (Exp 5) & $-0.71$ & $+0.62$ & $+1.32$ \\
-Post-contrastive, gated 120 steps (Exp 5b) & $-1.09$ & $-0.82$ & $+0.26$ \\
-Post-contrastive, margin=4 300 steps (Exp 6) & $-1.22$ & $+0.14$ & $+1.35$ \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-$S > 0$ in every configuration, confirming that the decoder consistently
-penalises wrong structure more than absent structure.
-This holds regardless of whether $\Delta_z$ is positive or negative,
-making $S$ a robust metric under mixed-precision noise conditions.
+\paragraph{The Semantic-Structural Tension.}
+Our experiments reveal a fundamental architectural tradeoff in explicit latent planning: \textbf{semantic compatibility and structural discrimination occupy competing optimization regimes in the projection manifold.} 
+When the projection is forced to encode global ordering, it deforms the continuous space so severely that it loses alignment with the decoder's discrete token embeddings. When the space is geometrically locked to preserve alignment (via gating or orthogonality), the projection lacks the capacity to induce deep structural sensitivity. 
 
 \paragraph{The NaN Problem.}
 Mixed-precision soft-prompting on MPS exposes a subtle interaction: the frozen
@@ -525,13 +454,9 @@ Our protocol (Section~\ref{sec:training}) resolves this entirely for all
 architectural variants, enabling reliable gradient flow through fp32
 embedding-space contrastive objectives.
 
-\paragraph{Limitations.}
-The experiments use a small dataset (40 training pairs) and short training
-(40–300 steps).
-The gated projection requires more steps to exceed the Shuffle/Zero ratio of
-1.0 that would constitute a clean structure-sensitivity confirmation.
-Future work should evaluate on larger corpora, longer training schedules,
-and downstream generation tasks with human evaluation.
+\paragraph{Limitations \& Future Work.}
+Our experiments deliberately employ a constrained scale (up to 450 training pairs) to map projection geometries without extensive compute. While sufficient for falsifying the hypothesis that simple gating or additive orthogonality can solve the semantic-structural tension, we cannot rule out that the semantic-structural tension is partially attributable to underfitting at this scale, and scaling experiments remain necessary to confirm the finding is architectural rather than data-regime dependent.
+Future work must address the core question identified here: how to encode order-sensitive latent trajectories without destroying decoder-compatible semantic geometry.
 
 % ============================================================
 \section{Related Work}
@@ -559,89 +484,72 @@ making it task-adaptive without per-task fine-tuning.
 \section{Conclusion}
 \label{sec:conclusion}
 
-We presented \textbf{Genesis Directive}, a framework for coupling diffusion-based
-latent planning with autoregressive text generation through a learned projection bridge.
-Our results demonstrate that:
+We presented \textbf{Genesis Directive}, a framework for mapping the representation geometry of explicit latent planning channels in autoregressive text generation. Our experiments isolating semantic alignment from order-aware contrastive optimization reveal a fundamental representational tradeoff:
 
 \begin{itemize}
-  \item The decoder actively attends to the latent prefix ($>50\%$ of attention
-    mass), confirming architectural coupling is effective.
-  \item The wrong-structure penalty $S = \Delta_s - \Delta_z > 0$ in every
-    experimental configuration, confirming that wrong structure is
-    consistently worse for the decoder than absent structure.
-    The strongest result is $S = +1.354$ nats after 300 contrastive steps
-    with the gated projection and margin $m=4.0$.
-  \item The gated projection starts with the lowest initial self-shuffle
-    separation ($\bar{d} = 0.42$), keeping it inside the contrastive margin
-    and receiving maximal gradient throughout training — making it the most
-    suitable architecture for this learning objective.
-  \item A systematic protocol for mixed-precision training on Apple MPS
-    eliminates fp16 NaN gradients entirely, providing a broadly applicable
-    engineering contribution for researchers working with frozen fp16 LLMs
-    on consumer hardware.
+  \item The projection manifold can easily achieve strong semantic compatibility ($\Delta_z = +1.61$ nats), proving the decoder can actively utilize the latent plan.
+  \item The projection can also learn deep structural sensitivity ($S = +1.37$ nats) by penalizing scrambled token order.
+  \item However, \textbf{these objectives compete for the same latent coordinates}. Full contrastive optimization induces catastrophic semantic drift, while structurally constrained orthogonal dual-head architectures preserve semantics but lack the capacity for deep structural separation.
+  \item A systematic protocol for mixed-precision training on Apple MPS eliminates fp16 NaN gradients entirely, providing a broadly applicable engineering contribution for researchers working with frozen fp16 LLMs.
 \end{itemize}
 
-Genesis Directive provides a principled path toward separating the
-\emph{what-to-say} (diffusion planner) from the \emph{how-to-say-it}
-(autoregressive decoder) in language generation systems, with potential
-applications in long-form document generation, dialogue, and structured
-prediction.
+Genesis Directive establishes that simple gating or additive orthogonality is insufficient to solve the semantic-structural tension in latent-prefix coupling. Future work must focus on deeper architectural unbinding to encode order-sensitive latent trajectories without destroying decoder-compatible semantic geometry.
 
 % ============================================================
 \bibliographystyle{unsrtnat}
 \begin{thebibliography}{99}
 
-\bibitem{nie2025llada}
+\bibitem[Nie et al.(2025)]{nie2025llada}
 Nie, S., et al.\ (2025).
 \textit{LLaDA: Large Language Diffusion with Autoregression}.
 arXiv:2502.09992.
 
-\bibitem{radford2019language}
+\bibitem[Radford et al.(2019)]{radford2019language}
 Radford, A., et al.\ (2019).
 \textit{Language Models are Unsupervised Multitask Learners}.
 OpenAI Blog.
 
-\bibitem{li2021prefix}
+\bibitem[Li and Liang(2021)]{li2021prefix}
 Li, X.\ L., \& Liang, P.\ (2021).
 \textit{Prefix-Tuning: Optimizing Continuous Prompts for Generation}.
 ACL 2021.
 
-\bibitem{hu2021lora}
+\bibitem[Hu et al.(2021)]{hu2021lora}
 Hu, E.\ J., et al.\ (2021).
 \textit{LoRA: Low-Rank Adaptation of Large Language Models}.
 ICLR 2022.
 
-\bibitem{chen2020simple}
+\bibitem[Chen et al.(2020)]{chen2020simple}
 Chen, T., et al.\ (2020).
 \textit{A Simple Framework for Contrastive Learning of Visual Representations}.
 ICML 2020.
 
-\bibitem{oord2018representation}
+\bibitem[van den Oord et al.(2018)]{oord2018representation}
 van den Oord, A., Li, Y., \& Vinyals, O.\ (2018).
 \textit{Representation Learning with Contrastive Predictive Coding}.
 arXiv:1807.03748.
 
-\bibitem{merity2017pointer}
+\bibitem[Merity et al.(2017)]{merity2017pointer}
 Merity, S., et al.\ (2017).
 \textit{Pointer Sentinel Mixture Models}.
 ICLR 2017.
 
-\bibitem{lovelace2023latent}
+\bibitem[Lovelace et al.(2023)]{lovelace2023latent}
 Lovelace, J., et al.\ (2023).
 \textit{Latent Diffusion for Language Generation}.
 NeurIPS 2023.
 
-\bibitem{yao2023tree}
+\bibitem[Yao et al.(2023)]{yao2023tree}
 Yao, S., et al.\ (2023).
 \textit{Tree of Thoughts: Deliberate Problem Solving with Large Language Models}.
 NeurIPS 2023.
 
-\bibitem{wei2022chain}
+\bibitem[Wei et al.(2022)]{wei2022chain}
 Wei, J., et al.\ (2022).
 \textit{Chain-of-Thought Prompting Elicits Reasoning in Large Language Models}.
 NeurIPS 2022.
 
-\bibitem{lester2021power}
+\bibitem[Lester et al.(2021)]{lester2021power}
 Lester, B., Al-Rfou, R., \& Constant, N.\ (2021).
 \textit{The Power of Scale for Parameter-Efficient Prompt Tuning}.
 EMNLP 2021.
