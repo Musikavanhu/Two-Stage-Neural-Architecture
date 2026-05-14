@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from models.diffusion_planner import DiffusionPlanner
 from models.autoregressive_decoder import AutoregressiveDecoder
-from models.projection import LatentProjection
+from models.projection import LatentProjection, DualProjection
 
 class GenesisDirectiveModel(nn.Module):
     def __init__(self, planner_path, decoder_path, device="mps", proj_type="standard"):
@@ -21,7 +21,10 @@ class GenesisDirectiveModel(nn.Module):
 
         self.z_norm   = nn.LayerNorm(in_features).to(device)
         print(f"Initializing Projection Network ({in_features} -> {out_features}) [Type: {proj_type}]...")
-        self.projection = LatentProjection(in_features, out_features, proj_type=proj_type).to(device)
+        if proj_type == "dual":
+            self.projection = DualProjection(in_features, out_features).to(device)
+        else:
+            self.projection = LatentProjection(in_features, out_features, proj_type=proj_type).to(device)
 
     def _align_z(self, z, target_len):
         b, seq, h = z.shape
